@@ -40,8 +40,13 @@ const LINKS = {
   whatsapp: "https://whatsapp.com/channel/0029Vb6vJlDEAKWAD2XfwG3D",
 };
 
-// ---------------- DATA ----------------
-const STATIONS = [
+// ---------------- SHEETS CSV ----------------
+// ✅ Senin verdiğin doğru link (gid=0, single=true, output=csv)
+const SHEETS_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSMgrnsaW6Jar68T0bDhARDG1r28DthDbXJxdJDtA-0FUcRM-mrxQQNVwxl6KL_kt2rLqUEWTWh9Rbk/pub?gid=0&single=true&output=csv";
+
+// ---------------- FALLBACK DEMO DATA (only used if sheets empty/error) ----------------
+const FALLBACK_STATIONS = [
   {
     id: "IST",
     name: "İstanbul",
@@ -68,7 +73,7 @@ const STATIONS = [
       EMF: 0.62,
       Radon: 0.22,
       Cosmic: 0.25,
-      Muller: 0.20,
+      Muller: 0.2,
       Leaf: 0.26,
       CO2: 0.18,
       CH4: 0.16,
@@ -80,14 +85,14 @@ const STATIONS = [
     lat: 42.02,
     lon: 35.15,
     metrics: {
-      ERT: 0.30,
+      ERT: 0.3,
       EMF: 0.35,
       Radon: 0.16,
-      Cosmic: 0.40,
+      Cosmic: 0.4,
       Muller: 0.22,
       Leaf: 0.24,
       CO2: 0.12,
-      CH4: 0.10,
+      CH4: 0.1,
     },
   },
   {
@@ -100,49 +105,42 @@ const STATIONS = [
       EMF: 0.95,
       Radon: 0.55,
       Cosmic: 0.35,
-      Muller: 0.40,
+      Muller: 0.4,
       Leaf: 0.48,
-      CO2: 0.30,
+      CO2: 0.3,
       CH4: 0.28,
     },
   },
 ];
 
+// Ref points only for INDEX+model (unchanged)
 const REF_CITIES = [
-  // Marmara
   { id: "BUR", name: "Bursa", lat: 40.19, lon: 29.06, ref: 0.35 },
-  { id: "KOC", name: "Kocaeli", lat: 40.77, lon: 29.92, ref: 0.40 },
+  { id: "KOC", name: "Kocaeli", lat: 40.77, lon: 29.92, ref: 0.4 },
 
-  // Ege
   { id: "IZM", name: "İzmir", lat: 38.42, lon: 27.14, ref: 0.33 },
-  { id: "MAN", name: "Manisa", lat: 38.62, lon: 27.43, ref: 0.30 },
+  { id: "MAN", name: "Manisa", lat: 38.62, lon: 27.43, ref: 0.3 },
   { id: "DEN", name: "Denizli", lat: 37.78, lon: 29.09, ref: 0.28 },
 
-  // Akdeniz
   { id: "ANT", name: "Antalya", lat: 36.89, lon: 30.71, ref: 0.34 },
   { id: "ADA", name: "Adana", lat: 37.0, lon: 35.32, ref: 0.45 },
-  { id: "HAT", name: "Hatay", lat: 36.2, lon: 36.16, ref: 0.50 },
+  { id: "HAT", name: "Hatay", lat: 36.2, lon: 36.16, ref: 0.5 },
 
-  // İç Anadolu
   { id: "ANK", name: "Ankara", lat: 39.93, lon: 32.86, ref: 0.32 },
-  { id: "KON", name: "Konya", lat: 37.87, lon: 32.48, ref: 0.30 },
+  { id: "KON", name: "Konya", lat: 37.87, lon: 32.48, ref: 0.3 },
   { id: "KAY", name: "Kayseri", lat: 38.72, lon: 35.48, ref: 0.36 },
 
-  // Karadeniz
-  { id: "SAM", name: "Samsun", lat: 41.29, lon: 36.33, ref: 0.30 },
+  { id: "SAM", name: "Samsun", lat: 41.29, lon: 36.33, ref: 0.3 },
   { id: "TRA", name: "Trabzon", lat: 41.0, lon: 39.72, ref: 0.28 },
 
-  // Doğu Anadolu
   { id: "ERZ", name: "Erzurum", lat: 39.9, lon: 41.27, ref: 0.35 },
   { id: "VAN", name: "Van", lat: 38.49, lon: 43.38, ref: 0.42 },
   { id: "MAL", name: "Malatya", lat: 38.35, lon: 38.31, ref: 0.44 },
 
-  // Güneydoğu Anadolu
   { id: "GAZ", name: "Gaziantep", lat: 37.06, lon: 37.38, ref: 0.48 },
   { id: "DIY", name: "Diyarbakır", lat: 37.91, lon: 40.23, ref: 0.46 },
 
-  // Ek denge
-  { id: "ESK", name: "Eskişehir", lat: 39.77, lon: 30.52, ref: 0.30 },
+  { id: "ESK", name: "Eskişehir", lat: 39.77, lon: 30.52, ref: 0.3 },
   { id: "SIV", name: "Sivas", lat: 39.75, lon: 37.02, ref: 0.34 },
 ];
 
@@ -182,6 +180,68 @@ function fmtDay(ts) {
   return `${dd}.${mm}`;
 }
 
+// ---------------- CSV PARSING (delimiter + TR decimal) ----------------
+function detectDelimiter(headerLine) {
+  const commas = (headerLine.match(/,/g) || []).length;
+  const semis = (headerLine.match(/;/g) || []).length;
+  return semis > commas ? ";" : ",";
+}
+
+function toNum(x, delim) {
+  if (x == null) return 0;
+  let s = String(x).trim();
+  if (!s) return 0;
+
+  // If delimiter is ';', decimal is usually ',' in TR locale
+  if (delim === ";") s = s.replace(",", ".");
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function pick(obj, ...keys) {
+  for (const k of keys) {
+    if (obj?.[k] !== undefined && obj?.[k] !== null) {
+      const v = String(obj[k]).trim();
+      if (v !== "") return obj[k];
+    }
+  }
+  return "";
+}
+
+function parseCSV(text) {
+  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim().length);
+  if (!lines.length) return { rows: [], delim: "," };
+
+  const delim = detectDelimiter(lines[0]);
+  const headers = lines[0].split(delim).map((h) => h.trim());
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(delim);
+    const obj = {};
+    for (let j = 0; j < headers.length; j++) {
+      obj[headers[j]] = (cols[j] ?? "").trim();
+    }
+
+    // clean possible empty first header column
+    if ("" in obj) delete obj[""];
+    if ("Unnamed: 0" in obj) delete obj["Unnamed: 0"];
+
+    rows.push(obj);
+  }
+  return { rows, delim };
+}
+
+// ---------------- NORMALIZATION MAXS (RAW -> SCORE) ----------------
+const MAXS = {
+  ERT_RAW: 600, // senin kullandığın
+  EMF_RAW: 300, // senin varsayımın
+  RADON: 150, // cps
+  MULLER: 3, // uSv/h
+  LEAF: 800, // mV
+};
+
 // ---------------- ANOMALY INDEX ----------------
 const WEIGHTS = { EMF: 0.4, Radon: 0.25, ERT: 0.2, Muller: 0.1, Leaf: 0.05 };
 
@@ -205,7 +265,7 @@ function alarmLabel(v) {
   return { txt: "Kırmızı (Çok Yüksek)", col: "#E74C3C" };
 }
 
-// ---------------- DEMO TIME SERIES ----------------
+// ---------------- TIME SERIES (demo generator but seeded by live metrics) ----------------
 function genSeriesForStation(st, days = 30, pointsPerDay = 4) {
   const seed = st.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
   const now = new Date();
@@ -224,8 +284,8 @@ function genSeriesForStation(st, days = 30, pointsPerDay = 4) {
       Radon: clamp01(m.Radon + noise * 0.9),
       Muller: clamp01(m.Muller + noise * 0.6),
       Leaf: clamp01(m.Leaf + noise * 0.5),
-      CO2: clamp01(m.CO2 + noise * 0.3),
-      CH4: clamp01(m.CH4 + noise * 0.3),
+      CO2: clamp01((m.CO2 ?? 0.2) + noise * 0.3),
+      CH4: clamp01((m.CH4 ?? 0.15) + noise * 0.3),
     };
 
     const idx = anomalyIndex(metrics);
@@ -242,7 +302,6 @@ function genSeriesForStation(st, days = 30, pointsPerDay = 4) {
   return out;
 }
 
-// Ref için de index serisi üret (Z1/Z2/Z3 her şehirde çalışsın)
 function genSeriesForRefCity(ref, days = 30, pointsPerDay = 4) {
   const seed = ref.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
   const now = new Date();
@@ -361,6 +420,11 @@ export default function App() {
   // INDEX mode
   const [indexMode, setIndexMode] = useState("real"); // real | model
 
+  // live stations from Sheets
+  const [stations, setStations] = useState(FALLBACK_STATIONS);
+  const [lastSync, setLastSync] = useState(null);
+  const [syncErr, setSyncErr] = useState("");
+
   // unified selection (station/ref)
   const [selection, setSelection] = useState({ kind: "station", id: "KMR" });
 
@@ -384,17 +448,130 @@ export default function App() {
     []
   );
 
+  // ----- Sheets loader (robust) -----
+  async function refreshFromSheets() {
+    try {
+      setSyncErr("");
+      const url = `${SHEETS_CSV_URL}&_t=${Date.now()}`;
+      const res = await fetch(url, { cache: "no-store" });
+      const text = await res.text();
+
+      // guard: html?
+      const low = text.slice(0, 200).toLowerCase();
+      if (low.includes("<html") || low.includes("<!doctype")) {
+        throw new Error("Sheets CSV yerine HTML döndürüyor. Publish ayarını kontrol et.");
+      }
+
+      const { rows, delim } = parseCSV(text);
+
+      const next = rows
+        .map((r) => {
+          const id = String(pick(r, "ID", "Id", "id")).trim();
+          const name = String(pick(r, "Şehirler", "Sehirler", "CITY", "City")).trim();
+
+          const lat = toNum(pick(r, "LAT", "Lat", "lat"), delim);
+          const lon = toNum(pick(r, "LON", "Lon", "lon", "LONG"), delim);
+
+          // Score-first, fallback raw->score
+          const ertS = toNum(pick(r, "ERT_S", "ERT_SCORE", "ERT"), delim);
+          const ertRaw = toNum(pick(r, "ERT_RAW"), delim);
+          const emfS = toNum(pick(r, "EMF_S", "EMF_SCORE", "EMF"), delim);
+          const emfRaw = toNum(pick(r, "EMF_RAW"), delim);
+
+          const piezzo = toNum(pick(r, "PIEZZO", "PİEZZO"), delim);
+          const magnetron = toNum(pick(r, "MAGNETRON", "MGNTRN"), delim);
+          const lnb = toNum(pick(r, "LNB"), delim);
+
+          const radonRaw = toNum(pick(r, "RADON", "Radon"), delim);
+          const mullerRaw = toNum(pick(r, "MÜLLER", "MULLER", "Muller"), delim);
+          const yig = toNum(pick(r, "YIG"), delim);
+          const leafRaw = toNum(pick(r, "LEAF", "Bitki", "BİTKİ VERİSİ"), delim);
+
+          const vdta = String(pick(r, "VDTA")).trim();
+          const alert = String(pick(r, "ALERT", "ALARM", "ALARM KOD", "ALARM_KOD")).trim();
+          const tarih = String(pick(r, "TARİH", "TARIH", "DATE")).trim();
+
+          // final scores 0..1
+          const ERT = ertS > 0 ? clamp01(ertS) : clamp01(ertRaw / MAXS.ERT_RAW);
+          const EMF = emfS > 0 ? clamp01(emfS) : clamp01(emfRaw / MAXS.EMF_RAW);
+
+          const Radon = clamp01(radonRaw / MAXS.RADON);
+          const Muller = clamp01(mullerRaw / MAXS.MULLER);
+          const Leaf = clamp01(leafRaw / MAXS.LEAF);
+
+          return {
+            id,
+            name,
+            lat,
+            lon,
+            raw: {
+              ERT_RAW: ertRaw,
+              EMF_RAW: emfRaw,
+              PIEZZO: piezzo,
+              MAGNETRON: magnetron,
+              LNB: lnb,
+              RADON: radonRaw,
+              MULLER: mullerRaw,
+              YIG: yig,
+              LEAF: leafRaw,
+              VDTA: vdta,
+              ALERT: alert,
+              TARIH: tarih,
+            },
+            metrics: {
+              ERT,
+              EMF,
+              Radon,
+              Cosmic: Muller, // “Cosmic” layer senin koddaki Muller üzerinden gidiyordu
+              Muller,
+              Leaf,
+              CO2: 0.2,
+              CH4: 0.15,
+            },
+          };
+        })
+        .filter(
+          (s) =>
+            s.id &&
+            s.name &&
+            Number.isFinite(s.lat) &&
+            Number.isFinite(s.lon) &&
+            Math.abs(s.lat) > 0.1 &&
+            Math.abs(s.lon) > 0.1
+        );
+
+      if (next.length) {
+        setStations(next);
+        setLastSync(new Date());
+        // selection id yoksa ilk istasyon seç
+        const hasSel = next.some((x) => x.id === selection.id);
+        if (!hasSel) setSelection({ kind: "station", id: next[0].id });
+      } else {
+        throw new Error("CSV okundu ama geçerli istasyon satırı bulunamadı (başlık/format kontrol).");
+      }
+    } catch (e) {
+      setSyncErr(e?.message ?? "Sheets okuma hatası");
+      // fallback kalsın
+    }
+  }
+
+  // initial load
+  useEffect(() => {
+    refreshFromSheets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Build series data (demo) for BOTH stations and refs
   const seriesByPoint = useMemo(() => {
     const map = new Map();
-    for (const st of STATIONS) map.set(st.id, genSeriesForStation(st, 30, 4));
+    for (const st of stations) map.set(st.id, genSeriesForStation(st, 30, 4));
     for (const r of REF_CITIES) map.set(r.id, genSeriesForRefCity(r, 30, 4));
     return map;
-  }, []);
+  }, [stations]);
 
   const selectedStation = useMemo(() => {
-    return STATIONS.find((s) => s.id === selection.id) ?? null;
-  }, [selection.id]);
+    return stations.find((s) => s.id === selection.id) ?? null;
+  }, [selection.id, stations]);
 
   const selectedRef = useMemo(() => {
     return REF_CITIES.find((r) => r.id === selection.id) ?? null;
@@ -409,12 +586,9 @@ export default function App() {
     const now = new Date();
     let from = null;
 
-    if (rangePreset === "24h")
-      from = new Date(now.getTime() - 24 * 3600 * 1000);
-    if (rangePreset === "7d")
-      from = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
-    if (rangePreset === "30d")
-      from = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+    if (rangePreset === "24h") from = new Date(now.getTime() - 24 * 3600 * 1000);
+    if (rangePreset === "7d") from = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+    if (rangePreset === "30d") from = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
 
     setFromISO(from ? from.toISOString() : "");
     setToISO(now.toISOString());
@@ -469,7 +643,7 @@ export default function App() {
 
   // Map points (stations)
   const stationsAsPoints = useMemo(() => {
-    return STATIONS.map((s) => ({
+    return stations.map((s) => ({
       id: s.id,
       name: s.name,
       lat: s.lat,
@@ -489,7 +663,7 @@ export default function App() {
           ? clamp01(anomalyIndex(s.metrics))
           : 0.3,
     }));
-  }, [layer]);
+  }, [layer, stations]);
 
   // Ref points only for INDEX + model
   const refPoints = useMemo(() => {
@@ -512,7 +686,7 @@ export default function App() {
       { d: 0.4, w: 0.45 },
       { d: 0.7, w: 0.25 },
     ];
-    for (const s of STATIONS) {
+    for (const s of stations) {
       const base = clamp01(s.metrics.EMF ?? 0);
       out.push({ lat: s.lat, lon: s.lon, v: base });
 
@@ -531,7 +705,7 @@ export default function App() {
       }
     }
     return out;
-  }, []);
+  }, [stations]);
 
   // Selection from map
   function onSelectPoint(p) {
@@ -613,11 +787,7 @@ export default function App() {
               />
 
               {/* EMF heat */}
-              <HeatLayer
-                enabled={layer === "EMF"}
-                points={emfHeatPoints}
-                gradient={gradient}
-              />
+              <HeatLayer enabled={layer === "EMF"} points={emfHeatPoints} gradient={gradient} />
 
               {/* Radon polygons */}
               {layer === "Radon" &&
@@ -660,8 +830,7 @@ export default function App() {
                     <Tooltip direction="top" offset={[0, -6]} opacity={1}>
                       <div style={{ fontWeight: 700 }}>{p.name}</div>
                       <div>
-                        {layer === "INDEX" ? "Anomali" : layer}:{" "}
-                        <b>{p.v.toFixed(2)}</b>
+                        {layer === "INDEX" ? "Anomali" : layer}: <b>{p.v.toFixed(2)}</b>
                       </div>
                     </Tooltip>
                   </CircleMarker>
@@ -743,6 +912,32 @@ export default function App() {
               </div>
             )}
 
+            {/* Sheets status panel */}
+            <div className="panel" style={{ marginBottom: 12 }}>
+              <div className="panel-title">Veri Kaynağı (Google Sheets)</div>
+              <div className="muted">
+                Son güncelleme:{" "}
+                <b>{lastSync ? lastSync.toLocaleString() : "—"}</b>
+              </div>
+              <div className="muted">
+                İstasyon sayısı: <b>{stations.length}</b>
+              </div>
+              {syncErr ? (
+                <div className="muted" style={{ marginTop: 8, color: "#ffb3b3" }}>
+                  Hata: <b>{syncErr}</b>
+                </div>
+              ) : null}
+
+              <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                <button className="btn" type="button" onClick={refreshFromSheets}>
+                  Yenile
+                </button>
+                <a className="btn ghost" href={SHEETS_CSV_URL} target="_blank" rel="noreferrer">
+                  CSV Aç
+                </a>
+              </div>
+            </div>
+
             {/* Z1: Time range selector */}
             <div className="panel" style={{ marginBottom: 12 }}>
               <div className="panel-title">Zaman Aralığı</div>
@@ -784,12 +979,11 @@ export default function App() {
               </div>
 
               <div className="muted" style={{ marginTop: 8 }}>
-                Seçili: <b>{selectedName}</b> · Kayıt:{" "}
-                <b>{filteredRecords.length}</b>
+                Seçili: <b>{selectedName}</b> · Kayıt: <b>{filteredRecords.length}</b>
               </div>
               <div className="muted">
-                Min/Ort/Max Anomali: <b>{quickStats.min}</b> /{" "}
-                <b>{quickStats.avg}</b> / <b>{quickStats.max}</b>
+                Min/Ort/Max Anomali: <b>{quickStats.min}</b> / <b>{quickStats.avg}</b> /{" "}
+                <b>{quickStats.max}</b>
               </div>
             </div>
 
@@ -813,10 +1007,6 @@ export default function App() {
                       <div>{clamp01(selectedStation.metrics.Muller).toFixed(2)}</div>
                       <div>Bitki</div>
                       <div>{clamp01(selectedStation.metrics.Leaf).toFixed(2)}</div>
-                      <div>CO₂</div>
-                      <div>{clamp01(selectedStation.metrics.CO2).toFixed(2)}</div>
-                      <div>CH₄</div>
-                      <div>{clamp01(selectedStation.metrics.CH4).toFixed(2)}</div>
 
                       <div>Anomali Endeksi</div>
                       <div>
@@ -842,8 +1032,8 @@ export default function App() {
                     </div>
 
                     <div className="muted" style={{ marginTop: 8 }}>
-                      Not: Alarm sınıfı “anomali seviyesi” içindir; deprem tahmini/erken
-                      uyarı değildir.
+                      Not: Alarm sınıfı “anomali seviyesi” içindir; deprem tahmini/erken uyarı
+                      değildir.
                     </div>
                   </>
                 ) : (
@@ -939,9 +1129,9 @@ export default function App() {
                 </div>
 
                 <div className="report-note">
-                  Bu rapor, gözlemsel anomalilerin izlenmesi amacıyla oluşturulmuştur.
-                  Deprem erken uyarı / deprem tahmin sistemi değildir. Model/simülasyon
-                  çıktıları içerebilir.
+                  Bu rapor, gözlemsel anomalilerin izlenmesi amacıyla oluşturulmuştur. Deprem
+                  erken uyarı / deprem tahmin sistemi değildir. Model/simülasyon çıktıları
+                  içerebilir.
                 </div>
               </div>
             </div>
@@ -971,12 +1161,12 @@ function AboutPage({ onBack }) {
       <h1>Biz Kimiz</h1>
       <p>
         <b>SIRIUS</b>, yer kabuğu–atmosfer–elektromanyetik alan etkileşimlerinde gözlenen{" "}
-        <b>fiziksel anomalileri</b> eşzamanlı izlemek ve bilimsel olarak analiz etmek
-        amacıyla geliştirilen bir anomali gözlem platformudur.
+        <b>fiziksel anomalileri</b> eşzamanlı izlemek ve bilimsel olarak analiz etmek amacıyla
+        geliştirilen bir anomali gözlem platformudur.
       </p>
       <p className="note">
-        Bu platform bir deprem erken uyarı / deprem tahmin sistemi değildir. Kesin
-        zaman-yer-büyüklük iddiası içermez.
+        Bu platform bir deprem erken uyarı / deprem tahmin sistemi değildir. Kesin zaman-yer-büyüklük
+        iddiası içermez.
       </p>
       <button className="btn ghost" type="button" onClick={onBack}>
         Haritaya dön
